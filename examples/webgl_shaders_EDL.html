@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<style>
+			body {
+				background-color: #000000;
+				margin: 0;
+				overflow: hidden;
+			}
+		</style>
+	</head>
+	<body>
+		<script src="../build/three.min.js"></script>
+
+		<script src="js/shaders/CopyShader.js"></script>
+		<script src="js/shaders/EDLShader.js"></script>
+
+		<script src="js/postprocessing/EffectComposer.js"></script>
+		<script src="js/postprocessing/RenderPass.js"></script>
+		<script src="js/postprocessing/MaskPass.js"></script>
+		<script src="js/postprocessing/ShaderPass.js"></script>
+		<script src="js/controls/OrbitControls.js"></script>
+		<script>
+
+			// workaround for chrome bug: http://code.google.com/p/chromium/issues/detail?id=35980#c12
+			if ( window.innerWidth === 0 ) { window.innerWidth = parent.innerWidth; window.innerHeight = parent.innerHeight; }
+
+			var camera, scene, renderer;
+			var group;
+			var depthMaterial, depthTarget, composer;
+			var camcontrols;
+			var effect;
+
+			init();
+			animate();
+
+			function init() {
+
+				renderer = new THREE.WebGLRenderer();
+				renderer.setClearColor( 0x000000, 1 );
+				renderer.setSize( window.innerWidth, window.innerHeight );
+
+				renderer.autoClearColor = true;
+
+				document.body.appendChild( renderer.domElement );
+
+				camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 10, 1000 );
+				camcontrols = new THREE.OrbitControls(this.camera);
+				camera.position.z = 500;
+
+				scene = new THREE.Scene();
+
+				group = new THREE.Object3D();
+				scene.add( group );
+
+				var geometry = new THREE.CubeGeometry( 10, 10, 10 );
+				var material = new THREE.MeshBasicMaterial( { color: 0xff0000 } );
+
+				for ( var i = 0; i < 100; i ++ ) {
+
+					var mesh = new THREE.Mesh( geometry, material );
+					mesh.position.x = Math.random() * 400 - 200;
+					mesh.position.y = Math.random() * 400 - 200;
+					mesh.position.z = Math.random() * 400 - 200;
+					mesh.rotation.x = Math.random();
+					mesh.rotation.y = Math.random();
+					mesh.rotation.z = Math.random();
+					mesh.scale.x = mesh.scale.y = mesh.scale.z = Math.random() * 10 + 1;
+					group.add( mesh );
+
+				}
+
+				// depth
+
+				var depthShader = THREE.ShaderLib[ "depthRGBA" ];
+				var depthUniforms = THREE.UniformsUtils.clone( depthShader.uniforms );
+
+				depthMaterial = new THREE.ShaderMaterial( { fragmentShader: depthShader.fragmentShader, vertexShader: depthShader.vertexShader, uniforms: depthUniforms } );
+				depthMaterial.blending = THREE.NoBlending;
+
+				// postprocessing
+
+				composer = new THREE.EffectComposer( renderer );
+				composer.addPass( new THREE.RenderPass( scene, camera ) );
+
+				depthTarget = new THREE.WebGLRenderTarget( window.innerWidth, window.innerHeight, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, format: THREE.RGBAFormat } );
+
+				var neighbourCount = 8;
+				var neighbours = new Float32Array(neighbourCount*2);
+
+				for ( var c = 0; c < neighbourCount; c++ ) {
+
+					neighbours[2*c+0] = Math.cos(2 * c * Math.PI / neighbourCount);
+					neighbours[2*c+1] = Math.sin(2 * c * Math.PI / neighbourCount);
+
+				}
+
+				var lightDir = new THREE.Vector3(0.0, 0.0, 1.0).normalize();
+
+				effect = new THREE.ShaderPass( THREE.EDLShader );
+
+				effect.uniforms[ 'screenWidth' ].value = window.innerWidth;
+				effect.uniforms[ 'screenHeight' ].value = window.innerHeight;
+				effect.uniforms[ 'near' ].value = camera.near;
+				effect.uniforms[ 'far' ].value = camera.far;
+				effect.uniforms[ 'neighbours' ].value = neighbours;
+				effect.uniforms[ 'lightDir' ].value = lightDir;
+				effect.uniforms[ 'expScale' ].value = 100;
+				effect.uniforms[ 'radius' ].value = 3;
+				effect.uniforms[ 'colorMap' ].value = depthTarget;
+
+				effect.renderToScreen = true;
+				composer.addPass( effect );
+
+			}
+
+			function animate() {
+
+				requestAnimationFrame( animate );
+				camcontrols.update();
+
+				var timer = performance.now();
+
+				group.rotation.x = timer * 0.0002;
+				group.rotation.y = timer * 0.0001;
+
+				scene.overrideMaterial = depthMaterial;
+				renderer.render( scene, camera, depthTarget );
+				scene.overrideMaterial = null;
+
+				if ( effect !== undefined )
+				{
+					effect.uniforms[ 'screenWidth' ].value = window.innerWidth;
+					effect.uniforms[ 'screenHeight' ].value = window.innerHeight;
+					effect.uniforms[ 'near' ].value = camera.near;
+					effect.uniforms[ 'far' ].value = camera.far;
+					effect.uniforms[ 'expScale' ].value = camera.far;
+					effect.uniforms[ 'colorMap' ].value = depthTarget;
+				}
+
+				composer.render();
+			}
+
+		</script>
+	</body>
+</html>

@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<style>
+			body {
+				background-color: #000000;
+				margin: 0;
+				overflow: hidden;
+			}
+		</style>
+	</head>
+	<body>
+		<script src="../build/three.min.js"></script>
+
+		<script src="js/shaders/CopyShader.js"></script>
+		<script src="js/shaders/EDLShader.js"></script>
+
+		<script src="js/postprocessing/EffectComposer.js"></script>
+		<script src="js/postprocessing/RenderPass.js"></script>
+		<script src="js/postprocessing/MaskPass.js"></script>
+		<script src="js/postprocessing/ShaderPass.js"></script>
+		<script src="js/controls/OrbitControls.js"></script>
+		<script>
+
+			// workaround for chrome bug: http://code.google.com/p/chromium/issues/detail?id=35980#c12
+			if ( window.innerWidth === 0 ) { window.innerWidth = parent.innerWidth; window.innerHeight = parent.innerHeight; }
+
+			var camera, scene, renderer;
+			var particleSystem;
+			var depthMaterial, depthTarget, composer;
+			var camcontrols;
+			var effect;
+
+			init();
+			animate();
+
+			function init() {
+
+				renderer = new THREE.WebGLRenderer();
+				renderer.setClearColor( 0x000000, 1 );
+				renderer.setSize( window.innerWidth, window.innerHeight );
+
+				renderer.autoClearColor = true;
+
+				document.body.appendChild( renderer.domElement );
+
+				camera = new THREE.PerspectiveCamera( 27, window.innerWidth / window.innerHeight, 5, 3500 );
+				camcontrols = new THREE.OrbitControls(this.camera);
+				camera.position.z = 2750;
+
+
+				scene = new THREE.Scene();
+
+				var particles = 500000;
+
+				var geometry = new THREE.BufferGeometry();
+
+				var positions = new Float32Array( particles * 3 );
+				var colors = new Float32Array( particles * 3 );
+
+				var color = new THREE.Color();
+
+				var n = 1000, n2 = n / 2; // particles spread in the cube
+
+				for ( var i = 0; i < positions.length; i += 3 ) {
+
+					// positions
+
+					var x = Math.random() * n - n2;
+					var y = Math.random() * n - n2;
+					var z = Math.random() * n - n2;
+
+					positions[ i ]     = x;
+					positions[ i + 1 ] = y;
+					positions[ i + 2 ] = z;
+
+					// colors
+
+					var vx = ( x / n ) + 0.5;
+					var vy = ( y / n ) + 0.5;
+					var vz = ( z / n ) + 0.5;
+
+					color.setRGB( vx, vy, vz );
+
+					colors[ i ]     = color.r;
+					colors[ i + 1 ] = color.g;
+					colors[ i + 2 ] = color.b;
+
+				}
+
+				geometry.addAttribute( 'position', new THREE.BufferAttribute( positions, 3 ) );
+				geometry.addAttribute( 'color', new THREE.BufferAttribute( colors, 3 ) );
+
+				geometry.computeBoundingSphere();
+
+				var geometry1 = new THREE.CubeGeometry( 10, 10, 10 );
+				var material1 = new THREE.MeshBasicMaterial( { color: 0xff0000 } );
+
+				var mesh = new THREE.Mesh( geometry1, material1 );
+scene.add(mesh);
+				//
+
+				var material = new THREE.PointsMaterial( { size: 15, vertexColors: THREE.VertexColors } );
+
+				particleSystem = new THREE.Points( geometry, material );
+				scene.add( particleSystem );
+
+
+				// depth
+
+				var depthShader = THREE.ShaderLib[ "depthRGBA" ];
+				var depthUniforms = THREE.UniformsUtils.clone( depthShader.uniforms );
+
+				depthMaterial = new THREE.ShaderMaterial( { fragmentShader: depthShader.fragmentShader, vertexShader: depthShader.vertexShader, uniforms: depthUniforms } );
+				depthMaterial.blending = THREE.NoBlending;
+
+				// postprocessing
+
+				composer = new THREE.EffectComposer( renderer );
+				composer.addPass( new THREE.RenderPass( scene, camera ) );
+
+				depthTarget = new THREE.WebGLRenderTarget( window.innerWidth, window.innerHeight, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, format: THREE.RGBAFormat } );
+
+				var neighbourCount = 8;
+				var neighbours = new Float32Array(neighbourCount*2);
+
+				for ( var c = 0; c < neighbourCount; c++ ) {
+
+					neighbours[2*c+0] = Math.cos(2 * c * Math.PI / neighbourCount);
+					neighbours[2*c+1] = Math.sin(2 * c * Math.PI / neighbourCount);
+
+				}
+
+				var lightDir = new THREE.Vector3(0.0, 0.0, 1.0).normalize();
+
+				effect = new THREE.ShaderPass( THREE.EDLShader );
+
+				effect.uniforms[ 'screenWidth' ].value = window.innerWidth;
+				effect.uniforms[ 'screenHeight' ].value = window.innerHeight;
+				effect.uniforms[ 'near' ].value = camera.near;
+				effect.uniforms[ 'far' ].value = camera.far;
+				effect.uniforms[ 'neighbours' ].value = neighbours;
+				effect.uniforms[ 'lightDir' ].value = lightDir;
+				effect.uniforms[ 'expScale' ].value = 100;
+				effect.uniforms[ 'radius' ].value = 3;
+				effect.uniforms[ 'colorMap' ].value = depthTarget;
+
+				effect.renderToScreen = true;
+				composer.addPass( effect );
+
+			}
+
+			function animate() {
+
+				requestAnimationFrame( animate );
+				camcontrols.update();
+
+				var timer = performance.now();
+
+				particleSystem.rotation.x = timer * 0.0002;
+				particleSystem.rotation.y = timer * 0.0001;
+
+				 scene.overrideMaterial = depthMaterial;
+				 renderer.render( scene, camera, depthTarget );
+				 scene.overrideMaterial = null;
+
+				 if ( effect !== undefined )
+				 {
+				 	effect.uniforms[ 'screenWidth' ].value = window.innerWidth;
+				 	effect.uniforms[ 'screenHeight' ].value = window.innerHeight;
+			 		effect.uniforms[ 'near' ].value = camera.near;
+				 	effect.uniforms[ 'far' ].value = camera.far;
+				 	effect.uniforms[ 'expScale' ].value = camera.far;
+				 	effect.uniforms[ 'colorMap' ].value = depthTarget;
+				 }
+
+				 composer.render();
+
+				//renderer.render( scene, camera);
+			}
+
+		</script>
+	</body>
+</html>
